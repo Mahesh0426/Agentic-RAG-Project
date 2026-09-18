@@ -12,7 +12,7 @@ _model_type: str | None = None  # "gemini" or "fallback"
 
 
 # ── Model initialisation ───────────────────────────────────────────────────────
-
+# reusable function is to test whether Gemini embeddings are working.
 def _probe_gemini():
     """Try one embed call to verify Gemini is reachable. Returns model or None."""
     try:
@@ -28,12 +28,14 @@ def _probe_gemini():
         return None
 
 
+# Fallback model - it will load a local embedding model if Gemini is unavailable.
 def _load_fallback():
     from sentence_transformers import SentenceTransformer
     logfire.info("Loading sentence-transformers fallback (all-mpnet-base-v2, 768-dim).")
     return SentenceTransformer("all-mpnet-base-v2")
 
 
+# Lazy Initialization -  This function chooses which embedding model your application will use.
 def _init():
     """Initialise embedding model once per process. Called lazily on first use."""
     global _active_model, _model_type
@@ -49,8 +51,8 @@ def _init():
         _model_type = "fallback"
 
 
-# ── Public helpers ─────────────────────────────────────────────────────────────
-
+# ── Dimension Public helpers ─────────────────────────────────────────────────────────────
+# It will tell application the dimension of the active embedding model.
 def get_embedding_dim() -> int:
     """Return the vector dimension for the active model. Call after _init()."""
     _init()
@@ -58,6 +60,8 @@ def get_embedding_dim() -> int:
 
 
 # ── Batch embedding with retry ─────────────────────────────────────────────────
+# This function is used to embed texts in batches of 50 eg :
+# Chunks 1-50 -> Gemini , Chunks 51-100 -> Gemini, Chunks 101-120 -> Gemini
 
 def _embed_batch(batch: list[str]) -> list[list[float]]:
     if _model_type == "gemini":
@@ -84,7 +88,7 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
 
 
 # ── Public API (same signatures as before) ─────────────────────────────────────
-
+# this function is used to embed a single query
 def embed_query(query: str) -> list[float]:
     _init()
     if _model_type == "gemini":
@@ -92,11 +96,26 @@ def embed_query(query: str) -> list[float]:
     return _active_model.encode([query])[0].tolist()
 
 
+# ── Bulk Text Ingestion ────────────────────────────────────────────────────────
+# Converts multiple document chunks into vector embeddings (used during ingestion)
 def embed_texts(texts: list[str]) -> list[list[float]]:
+    """
+    Embeds a list of texts into dense vectors in batches of BATCH_SIZE.
+    Returns a list of vectors matching the order of input texts.
+    """
+    # 1. Ensure the active embedding model (Gemini or fallback) is initialized
     _init()
+    
     all_embeddings: list[list[float]] = []
+    
+    # 2. Slice texts into smaller batches (e.g. 0-50, 50-100) to avoid API timeout/payload limits
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i : i + BATCH_SIZE]
+        
+        # 3. Logfire span traces duration, active model, and progress for this specific batch
         with logfire.span("Embed batch", model=_model_type, start=i, size=len(batch)):
+            # 4. Embed the current batch (with retry if rate limited) and append results
             all_embeddings.extend(_embed_batch(batch))
+            
+    # 5. Return all generated vector embeddings
     return all_embeddings
