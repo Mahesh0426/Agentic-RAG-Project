@@ -1,6 +1,8 @@
 /DATA
 DATA/noisy_data
 DATA/true_data
+/processed_data
+/processed_data/local_upload
 
 venv/
 .venv/
