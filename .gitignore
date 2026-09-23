@@ -4,6 +4,7 @@ DATA/true_data
 /processed_data
 /processed_data/local_upload
 .logfire
+AGENTS.md
 
 venv/
 .venv/
