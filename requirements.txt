@@ -45,6 +45,7 @@ loguru                      # Enhanced logging for Python
 # --- GUARDRAILS ---
 nemoguardrails              # NVIDIA NeMo Guardrails for input/output safety rails
 langchain-nvidia-ai-endpoints # LangChain integration with NVIDIA AI Endpoints
+langchain-google-vertexai   # Required shim for NeMo Guardrails internal import (no GCP credentials needed)
 
 # --- LLM GATEWAY ---
 portkey-ai                  # Portkey Gateway for unified LLM routing, fallbacks & observability

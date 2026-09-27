@@ -23,3 +23,6 @@ postgres_data/
 # macOS
 .DS_Store
 
+# Testing cache
+.pytest_cache/
+
