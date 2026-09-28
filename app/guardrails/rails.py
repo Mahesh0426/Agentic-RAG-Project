@@ -1,5 +1,6 @@
 #The purpose of rails.py is to act as a security and conversational gatekeeper 
 # for the application before any query enters the main RAG pipeline.
+import re
 import logfire
 from langchain_groq import ChatGroq
 from nemoguardrails import RailsConfig, LLMRails
@@ -17,17 +18,18 @@ _rails: LLMRails | None = None
 def initialize_rails() -> None:
     """
     Build the NeMo LLMRails singleton at app startup.
-    Uses llama-3.1-8b-instant for fast intent classification at the gate —
-    the heavier llama-3.3-70b-versatile is reserved for the RAG pipeline.
+    Uses openai/gpt-oss-20b for fast intent classification at the gate —
+    the heavier openai/gpt-oss-120 is reserved for the RAG pipeline.
     """
     global _rails
 
     # 1. Configure the gatekeeper LLM (fast, lightweight model with temperature 0 for deterministic checks)
     guard_llm = ChatGroq(
         api_key=settings.GROQ_API_KEY,
-        model="llama-3.1-8b-instant",
+        model=settings.GROQ_GUARD_MODEL,
         temperature=0
     )
+    
 
     # 2. Parse Colang flows (intent & dialogue rules) and YAML system instructions
     config = RailsConfig.from_content(
@@ -37,7 +39,7 @@ def initialize_rails() -> None:
 
     # 3. Instantiate the rails engine and assign to singleton variable
     _rails = LLMRails(config, llm=guard_llm)
-    logfire.info("🛡️ NeMo Guardrails initialised (llama-3.1-8b-instant).")
+    logfire.info(f"🛡️ NeMo Guardrails initialised ({settings.GROQ_GUARD_MODEL}).")
 
 
 # ============================================================
@@ -66,14 +68,24 @@ def guard(message: str) -> tuple[bool, str | None]:
         # 3. Extract the text response from NeMo result (handles dict or string)
         content = result.get("content", "") if isinstance(result, dict) else str(result)
 
-        # 4. Check if any known rail indicator substring is present in the response
-        fired = any(indicator in content for indicator in RAIL_INDICATORS)
+        # 4. Clean reasoning tags (<think>...</think>) produced by reasoning models and normalize quotes
+        clean_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        normalized_content = clean_content.replace("’", "'").lower()
 
-        # 5. If a rail triggered, intercept and return the canned response directly
+        # 5. Check if any known rail indicator substring is present in the normalized response
+        fired = any(indicator.lower().replace("’", "'") in normalized_content for indicator in RAIL_INDICATORS)
+
+        # 6. If a rail triggered, intercept and return the canned response directly
         if fired:
             logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
-            return True, content
+            # Return cleaned response, or provide standard informative fallback if empty
+            response_text = (
+                clean_content
+                if len(clean_content) > 5
+                else "I'm an Enterprise IT Assistant focused on Kubernetes, Intel hardware, and networking. I can't help with that — but ask me anything technical!"
+            )
+            return True, response_text
 
-        # 6. If no rails fired, let the message proceed into the RAG pipeline
+        # 7. If no rails fired, let the message proceed into the RAG pipeline
         logfire.info("✅ Guardrails passed.")
         return False, None

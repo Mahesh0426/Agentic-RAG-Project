@@ -30,10 +30,13 @@ GATEWAY_CONFIG = {
     ]
 }
 
+# Saved config ID (pc-...) if configured in environment, otherwise None (to prevent inline_config_blocked)
+ACTIVE_PORTKEY_CONFIG = settings.PORTKEY_CONFIG_ID if settings.PORTKEY_CONFIG_ID else None
+
 # Standalone Portkey native client instance configured with gateway rules
 portkey_client = Portkey(
     api_key=settings.PORTKEY_API_KEY,
-    config=GATEWAY_CONFIG
+    **({"config": ACTIVE_PORTKEY_CONFIG} if ACTIVE_PORTKEY_CONFIG else {})
 )
 
 
@@ -53,23 +56,27 @@ def get_langchain_llm(feature: str = "rag") -> ChatOpenAI:
       auth + config). The @rag/model-name format is Portkey-specific — Groq's own client
       does not understand it. You are still using Groq models; Portkey is just in the middle.
     """
-    # 1. Instantiate ChatOpenAI pointed at Portkey's reverse-proxy URL instead of OpenAI
+    # 1. Build Portkey header payload
+    header_kwargs = {
+        "api_key": settings.PORTKEY_API_KEY,
+        "metadata": {
+            "feature": feature,
+            "_user": "rag-system",
+            "environment": "production"
+        }
+    }
+    if ACTIVE_PORTKEY_CONFIG:
+        header_kwargs["config"] = ACTIVE_PORTKEY_CONFIG
+
+    # 2. Instantiate ChatOpenAI pointed at Portkey's reverse-proxy URL instead of OpenAI
     return ChatOpenAI(
         api_key=settings.PORTKEY_API_KEY,
         base_url=PORTKEY_GATEWAY_URL,
-        # 2. Reference the virtual model slug registered in Portkey
-        model=f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b",
+        # Reference the virtual model slug registered in Portkey
+        model=f"@{settings.GROQ_SLUG}/{settings.GROQ_MODEL}",
         temperature=0,
-        # 3. Attach custom Portkey headers containing auth, fallback configs, and tracing metadata
-        default_headers=createHeaders(
-            api_key=settings.PORTKEY_API_KEY,
-            config=GATEWAY_CONFIG,
-            metadata={
-                "feature": feature,
-                "_user": "rag-system",
-                "environment": "production"
-            }
-        )
+        # Attach custom Portkey headers containing auth and tracing metadata
+        default_headers=createHeaders(**header_kwargs)
     )
 
 

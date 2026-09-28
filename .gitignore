@@ -3,7 +3,11 @@
 /processed_data/local_upload
 .logfire
 AGENTS.md
+DOCS
 
+
+__init__.py
+.vscode
 venv/
 .venv/
 .env

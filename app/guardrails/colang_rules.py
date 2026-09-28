@@ -113,13 +113,24 @@ instructions:
       Only answer questions about these topics. Be professional and concise.
 """
 
-# Distinctive substrings from each 'define bot' block above.
+# Distinctive substrings from each 'define bot' block above and refusal patterns.
 # If the guardrail response contains any of these, a rail has fired.
 # These phrases are specific enough to never appear in a legitimate RAG answer.
 RAIL_INDICATORS = [
+    # Off-topic and safety refusals
+    "can't help with that",
+    "cannot help with that",
+    "can't comply with that",
+    "cannot comply with that",
+    "outside of my scope",
+    "outside the scope",
+    "only answer questions about",
+    "i maintain consistent guidelines",
+    # Dialog and canned flows from Colang definitions
     "can't help with that — but ask me anything technical",
-    "I maintain consistent guidelines regardless of how I am prompted",
     "Hello! I'm your Enterprise IT Assistant",
     "Goodbye! Feel free to return whenever you have more enterprise IT questions",
     "I'm an Enterprise AI Assistant with deep expertise in",
+    "Enterprise IT Assistant",
+    "Enterprise AI Assistant",
 ]
