@@ -36,6 +36,11 @@ CONTEXT_LIMIT = 2       # number of context chunks passed to RAGAS per sample
 
 
 def _build_judge():
+    """
+    Initializes and returns the evaluation LLM judge and embedding models.
+    - Uses JUDGE_GROQ (or GROQ_API_KEY fallback) pointing to Groq's OpenAI-compatible endpoint.
+    - Uses local HuggingFace embeddings (all-MiniLM-L6-v2) to avoid consuming remote API rate limits.
+    """
     api_key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
     client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
     llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
@@ -46,6 +51,10 @@ def _build_judge():
     return llm, embeddings
 
 async def _cooldown(seconds: int, label: str, status_cb=None):
+    """
+    Pauses execution in 10-second intervals to allow Groq's sliding TPM window to reset.
+    Optionally streams live progress messages to status_cb for UI or terminal feedback.
+    """
     msg = f"⏳ {seconds}s cooldown after {label} (Groq TPM buffer)..."
     if status_cb:
         status_cb(msg)
@@ -75,6 +84,10 @@ def _prep_samples(golden_dataset: dict) -> list:
 
 
 def _score_df(metric_key: str, samples: list, scores) -> pd.DataFrame:
+    """
+    Constructs a pandas DataFrame from RAGAS evaluation scores.
+    Truncates question text to 65 characters for display and rounds score values to 3 decimals.
+    """
     return pd.DataFrame([
         {"question": s["question"][:65], metric_key: round(float(r.value), 3)}
         for s, r in zip(samples, scores)
@@ -83,13 +96,15 @@ def _score_df(metric_key: str, samples: list, scores) -> pd.DataFrame:
 
 async def _batched_score(metric, inputs: list, samples: list, status_cb=None, label: str = "") -> list:
     """
-    Runs abatch_score in chunks of GENERAL_BATCH_SIZE with cooldowns between chunks.
-    Keeps each burst under 6,000 TPM on Groq's on_demand tier.
+    Executes abatch_score in micro-batches with cooldown pauses between chunks.
+    This prevents burst traffic from exceeding the 6,000 TPM limit on Groq's on-demand tier.
     """
     all_scores = []
+    # Split inputs into chunks of GENERAL_BATCH_SIZE (default: 1)
     batches = [inputs[i : i + GENERAL_BATCH_SIZE] for i in range(0, len(inputs), GENERAL_BATCH_SIZE)]
     for b_idx, batch in enumerate(batches):
         if b_idx > 0:
+            # Wait for TPM window recovery before firing next sample
             await _cooldown(COOLDOWN_MINI, f"{label} batch {b_idx}", status_cb)
         scores = await metric.abatch_score(batch)
         all_scores.extend(scores)
@@ -97,10 +112,20 @@ async def _batched_score(metric, inputs: list, samples: list, status_cb=None, la
 
 async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
     """
-    Runs all 6 experiments. Returns dict keyed by metric name → DataFrame.
-    status_cb(message: str) is called for live UI updates.
+    Main evaluation pipeline orchestrating all 6 benchmark experiments:
+      1. Faithfulness (RAGAS LLM): Measures factual grounding of response in retrieved contexts.
+      2. Answer Relevancy (RAGAS LLM + Embeddings): Measures if response directly addresses user question.
+      3. Context Precision (RAGAS LLM): Evaluates if ground truth relevant chunks rank at the top.
+      4. Context Recall (RAGAS LLM): Checks if all facts in reference answer are retrieved.
+      5. Answer Correctness (RAGAS LLM + Embeddings): Evaluates semantic similarity and factual accuracy.
+      6. Tool Correctness (Deterministic): Computes Jaccard similarity of called vs expected tool sets.
+
+    Returns:
+      dict[str, pd.DataFrame]: Mapping of metric name to evaluation DataFrame.
     """
+    # Initialize the LLM judge and local embedding models
     judge_llm, ragas_embeddings = _build_judge()
+    # Filter valid samples and truncate long contexts to avoid TPM quota violations
     samples = _prep_samples(golden_dataset)
 
     if not samples:
@@ -111,6 +136,7 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
     with logfire.span("🧪 Eval Phase 2 — All Metrics", total_samples=len(samples)):
 
         # ── Exp 1: Faithfulness ───────────────────────────────────────────────
+        # Evaluates factual consistency: Are all claims in the response grounded in retrieved contexts?
         if status_cb:
             status_cb(f"🧪 Exp 1/6 — Faithfulness ({len(samples)} samples)...")
         with logfire.span("🧪 Exp 1 — Faithfulness"):
@@ -127,6 +153,7 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             results["faithfulness"] = df
             logfire.info("🧪 Faithfulness done", avg=round(df["faithfulness"].mean(), 3))
 
+        # Cooldown to recover Groq TPM capacity before next experiment
         await _cooldown(COOLDOWN_STANDARD, "Faithfulness", status_cb)
 
         # ── Exp 2: Answer Relevancy ───────────────────────────────────────────
@@ -208,11 +235,14 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
         await _cooldown(COOLDOWN_STANDARD, "Answer Correctness", status_cb)
 
         # ── Exp 6: Tool Correctness (no LLM — Jaccard) ───────────────────────
+        # Deterministically compares called tools vs expected tools via Jaccard index:
+        # Score = |called ∩ expected| / |called ∪ expected| (zero LLM calls needed)
         if status_cb:
             status_cb("⚡ Exp 6/6 — Tool Correctness (zero LLM calls)...")
         with logfire.span("🧪 Exp 6 — Tool Correctness"):
             tool_rows = []
             for s in samples:
+                # Convert list of tool names into unique sets for set operations
                 called = set(s.get("actual_tools_called") or [])
                 expected = set(s.get("expected_tools") or [])
                 union = len(called | expected)
