@@ -19,7 +19,7 @@ services:
       # By default the app reads QDRANT_URL / QDRANT_API_KEY from the .env file.
       # Set these explicitly here only when you want to override the .env values
       # (e.g. to point at the local qdrant service above).
-      QDRANT_COLLECTION: enterprise_rag
+      QDRANT_COLLECTION: Production_Grade_Rag
       RATE_LIMIT_PER_MINUTE: "60"
       RAG_API_KEY: ""
       LOGFIRE_IGNORE_NO_CONFIG: "1"

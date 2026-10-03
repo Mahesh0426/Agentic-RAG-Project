@@ -8,6 +8,15 @@ class Settings:
     # --- GEMINI EMBEDDINGS ---
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+
+    JINA_API_KEY = os.getenv("JINA_API_KEY")
+    NEON_DB_URL=os.getenv("NEON_DB_URL")
+    UPSTASH_REDIS_REST_URL=os.getenv("UPSTASH_REDIS_REST_URL")
+    UPSTASH_REDIS_REST_TOKEN=os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    LOGFIRE_TOKEN=os.getenv("LOGFIRE_TOKEN")
+    
+    
+
     # --- VECTOR DB (QDRANT) ---
     QDRANT_URL = os.getenv("QDRANT_CLUSTER_ENDPOINT")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -32,9 +41,10 @@ class Settings:
     LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 
 # Apply LangChain environment variables for automatic tracing (only when API key is provided)
-if os.getenv("LANGSMITH_API_KEY"):
+langsmith_api_key = os.getenv("LANGSMITH_API_KEY")
+if langsmith_api_key:
     os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGSMITH_TRACING", "true")
-    os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
+    os.environ["LANGSMITH_API_KEY"] = langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "rag_scale_test")
     os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 else:
